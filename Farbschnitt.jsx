@@ -1,18 +1,18 @@
 /**
- * Farbschnitt.jsx - Agency Quality Adobe InDesign Script
+ * Farbschnitt.jsx - Professional Adobe InDesign Script
  *
- * Erstellt einen digitalen Farbschnitt auf Buchseiten in Adobe InDesign.
+ * Modern, clean ExtendScript for automated digital edge printing on book pages.
+ *
  * Features:
- * - ScriptUI Dialog mit interaktivem Editor / Canvas-Vorschau
- * - Positionierung (Pan X/Y, Zoom/Skalierung, Einpassen)
- * - Mehrfach-Auswahl der Kanten: Vorderschnitt (Fore-edge), Kopfschnitt (Top), Fußschnitt (Bottom)
- * - Einstellbarer Anschnitt (Bleed), Schnitttiefe (Strip Depth), Seitendicke und Deckkraft (Opacity)
- * - Automatische Erkennung von Doppelseiten (Verso / Recto)
- * - Automatisches Ebenen-Management ("Farbschnitt"-Ebene)
- * - Rückgängig machen als eine einzige Aktion (UndoModes.ENTIRE_SCRIPT)
+ * - Clean modern ScriptUI layout
+ * - Independent image selection per edge (Vorderschnitt, Kopfschnitt, Fußschnitt)
+ * - Automatic image rotation for top (90°) and bottom (270°) edges
+ * - Spine / Gutter protection (top/bottom edges do not cross page center spine)
+ * - Optional Test Verification Mode (places a reference test strip adjacent to pages)
+ * - Managed "Farbschnitt" layer & single-step UNDO
  *
  * @author Agency Quality Software Engineering
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 #target indesign
@@ -25,6 +25,7 @@
     // CONFIGURATION & CONSTANTS
     // ==========================================
     var LAYER_NAME = "Farbschnitt";
+    var TEST_LAYER_NAME = "Farbschnitt_Test_Verification";
     var SCRIPT_NAME = "Digitaler Farbschnitt Generator";
     var MM_TO_PT = 2.834645669291339;
     var PT_TO_MM = 0.3527777777777778;
@@ -41,6 +42,9 @@
             return pt * PT_TO_MM;
         },
 
+        /**
+         * Calculates frame bounds, graphic bounds, and rotation for a page slice
+         */
         calculateSlice: function (opts) {
             var pageIndex = opts.pageIndex;          // 0 to pageCount - 1
             var pageCount = opts.pageCount;          // Total pages in book
@@ -51,57 +55,95 @@
             var pageHeight = opts.pageHeight;        // Page height in pt
             var isVerso = opts.isVerso;              // true = Left page, false = Right page
             var edge = opts.edge || 'foreEdge';      // 'foreEdge', 'topEdge', 'bottomEdge'
-
-            var offsetX = opts.offsetX || 0;
-            var offsetY = opts.offsetY || 0;
-            var scaleFactor = opts.scaleFactor || 1.0;
+            var generateTestStrip = opts.generateTestStrip || false;
 
             // Total thickness of book block
             var totalThickness = pageCount * paperThickness;
             var sliceXStart = pageIndex * paperThickness;
 
-            // Frame bounds [top, left, bottom, right] in page coordinates
             var frameTop, frameLeft, frameBottom, frameRight;
+            var rotation = 0; // Graphic rotation in degrees (0, 90, 270)
 
             if (edge === 'foreEdge') {
                 frameTop = -bleed;
                 frameBottom = pageHeight + bleed;
                 if (isVerso) {
-                    // Left page (Verso): Fore-edge is on LEFT
+                    // Left page (Verso): Fore-edge on LEFT. Bleed on outer left.
                     frameLeft = -bleed;
                     frameRight = stripDepth;
                 } else {
-                    // Right page (Recto): Fore-edge is on RIGHT
+                    // Right page (Recto): Fore-edge on RIGHT. Bleed on outer right.
                     frameLeft = pageWidth - stripDepth;
                     frameRight = pageWidth + bleed;
                 }
             } else if (edge === 'topEdge') {
                 frameTop = -bleed;
                 frameBottom = stripDepth;
-                frameLeft = -bleed;
-                frameRight = pageWidth + bleed;
+                if (isVerso) {
+                    // Left page: Outer edge left, Spine right. No bleed across spine!
+                    frameLeft = -bleed;
+                    frameRight = pageWidth; // Stop strictly at spine (right side)
+                } else {
+                    // Right page: Spine left, Outer edge right. No bleed across spine!
+                    frameLeft = 0; // Start strictly at spine (left side)
+                    frameRight = pageWidth + bleed;
+                }
+                rotation = 90; // Rotate image for top edge
             } else if (edge === 'bottomEdge') {
                 frameTop = pageHeight - stripDepth;
                 frameBottom = pageHeight + bleed;
-                frameLeft = -bleed;
-                frameRight = pageWidth + bleed;
+                if (isVerso) {
+                    // Left page: Outer edge left, Spine right. No bleed across spine!
+                    frameLeft = -bleed;
+                    frameRight = pageWidth; // Stop strictly at spine (right side)
+                } else {
+                    // Right page: Spine left, Outer edge right. No bleed across spine!
+                    frameLeft = 0; // Start strictly at spine (left side)
+                    frameRight = pageWidth + bleed;
+                }
+                rotation = 270; // Rotate image for bottom edge
             }
 
             var frameWidth = frameRight - frameLeft;
 
             // Compute graphic positioning
-            var graphicWidth = frameWidth * (totalThickness / paperThickness) * scaleFactor;
+            var graphicWidth = frameWidth * (totalThickness / paperThickness);
             var scaleX = graphicWidth / totalThickness;
 
-            var graphicLeft = frameLeft - (sliceXStart * scaleX) + offsetX;
+            var graphicLeft = frameLeft - (sliceXStart * scaleX);
             var graphicRight = graphicLeft + graphicWidth;
 
-            var graphicTop = -bleed + offsetY;
-            var graphicBottom = (pageHeight + bleed) * scaleFactor + offsetY;
+            var graphicTop = -bleed;
+            var graphicBottom = pageHeight + bleed;
+
+            // Test Strip / Reference Mode Bounds (placed directly adjacent to page for visual verification)
+            var testFrameBounds = null;
+            if (generateTestStrip) {
+                var testOffset = 15; // 15 pt spacing outside page margin
+                if (isVerso) {
+                    // Place test strip to left of left page
+                    testFrameBounds = [
+                        frameTop,
+                        -bleed - testOffset - stripDepth,
+                        frameBottom,
+                        -bleed - testOffset
+                    ];
+                } else {
+                    // Place test strip to right of right page
+                    testFrameBounds = [
+                        frameTop,
+                        pageWidth + bleed + testOffset,
+                        frameBottom,
+                        pageWidth + bleed + testOffset + stripDepth
+                    ];
+                }
+            }
 
             return {
                 frameBounds: [frameTop, frameLeft, frameBottom, frameRight],
-                graphicBounds: [graphicTop, graphicLeft, graphicBottom, graphicRight]
+                graphicBounds: [graphicTop, graphicLeft, graphicBottom, graphicRight],
+                rotation: rotation,
+                testFrameBounds: testFrameBounds
             };
         }
     };
@@ -153,222 +195,142 @@
             var docPageWidthMm = FarbschnittMath.ptToMm(docPageWidthPt);
             var docPageHeightMm = FarbschnittMath.ptToMm(docPageHeightPt);
 
-            // Standard default parameters
+            // Default parameters
             var defaultPaperThickness = 0.1; // 0.1 mm per page
             var defaultStripDepth = 3.0;     // 3 mm into page
             var defaultBleed = 3.0;          // 3 mm bleed
             var defaultOpacity = 100;        // 100% opacity
 
-            // Build ScriptUI Window
-            var win = new Window("dialog", SCRIPT_NAME + " - Professional Studio");
-            win.orientation = "column";
-            win.alignChildren = ["fill", "top"];
-            win.spacing = 10;
-            win.margins = 16;
-
-            // Header Panel
-            var pnlHeader = win.add("panel", undefined, "Dokument-Informationen");
-            pnlHeader.orientation = "row";
-            pnlHeader.alignChildren = ["left", "center"];
-            pnlHeader.add("statictext", undefined, "Seitenanzahl: " + totalPages + "  |  Format: " + docPageWidthMm.toFixed(1) + " x " + docPageHeightMm.toFixed(1) + " mm");
-
-            // Main Layout: Left Controls, Right Preview Editor
-            var mainGroup = win.add("group");
-            mainGroup.orientation = "row";
-            mainGroup.alignChildren = ["left", "fill"];
-            mainGroup.spacing = 15;
-
-            // Left Controls Panel
-            var leftCol = mainGroup.add("group");
-            leftCol.orientation = "column";
-            leftCol.alignChildren = ["fill", "top"];
-            leftCol.spacing = 10;
-            leftCol.preferredSize.width = 300;
-
-            // 1. File Selection
-            var pnlFile = leftCol.add("panel", undefined, "1. Quellbild für Farbschnitt");
-            pnlFile.orientation = "column";
-            pnlFile.alignChildren = ["fill", "top"];
-            pnlFile.spacing = 6;
-
-            var btnFile = pnlFile.add("button", undefined, "Bild auswählen...");
-            var txtFile = pnlFile.add("statictext", undefined, "Keine Datei ausgewählt", { truncate: "middle" });
-            txtFile.preferredSize.width = 280;
-
-            var selectedFile = null;
-            btnFile.onClick = function () {
-                var f = File.openDialog("Quellbild für den Farbschnitt auswählen", "Bilder:*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.psd;*.pdf;*.ai");
-                if (f) {
-                    selectedFile = f;
-                    txtFile.text = f.displayName;
-                    updatePreviewCanvas();
-                }
+            // Selected images per edge
+            var imageFiles = {
+                foreEdge: null,
+                topEdge: null,
+                bottomEdge: null
             };
 
-            // 2. Book Block & Paper Settings
-            var pnlSpecs = leftCol.add("panel", undefined, "2. Buchblock & Farbschnitt-Spezifikation");
+            // Build ScriptUI Window (Clean Claymorphic Style)
+            var win = new Window("dialog", SCRIPT_NAME + " - Pro Studio");
+            win.orientation = "column";
+            win.alignChildren = ["fill", "top"];
+            win.spacing = 12;
+            win.margins = 18;
+
+            // Header Panel
+            var pnlHeader = win.add("panel", undefined, "Dokument-Ubersicht");
+            pnlHeader.orientation = "row";
+            pnlHeader.alignChildren = ["left", "center"];
+            pnlHeader.add("statictext", undefined, "Seiten: " + totalPages + "  |  Format: " + docPageWidthMm.toFixed(1) + " x " + docPageHeightMm.toFixed(1) + " mm");
+
+            // Section 1: Book Specs & Paper Geometry
+            var pnlSpecs = win.add("panel", undefined, "1. Buchblock-Geometrie & Parameter");
             pnlSpecs.orientation = "column";
             pnlSpecs.alignChildren = ["fill", "top"];
             pnlSpecs.spacing = 8;
 
-            // Paper thickness
-            var grpThickness = pnlSpecs.add("group");
-            grpThickness.add("statictext", undefined, "Papierstärke (mm/Seite):");
-            var inpThickness = grpThickness.add("edittext", undefined, defaultPaperThickness.toString());
-            inpThickness.preferredSize.width = 60;
+            var grpRow1 = pnlSpecs.add("group");
+            grpRow1.orientation = "row";
+            grpRow1.spacing = 15;
 
-            // Calculated Book Thickness
+            grpRow1.add("statictext", undefined, "Papierstarke (mm/Seite):");
+            var inpThickness = grpRow1.add("edittext", undefined, defaultPaperThickness.toString());
+            inpThickness.preferredSize.width = 50;
+
+            grpRow1.add("statictext", undefined, "Tiefe (mm):");
+            var inpStripDepth = grpRow1.add("edittext", undefined, defaultStripDepth.toString());
+            inpStripDepth.preferredSize.width = 50;
+
+            grpRow1.add("statictext", undefined, "Bleed (mm):");
+            var inpBleed = grpRow1.add("edittext", undefined, defaultBleed.toString());
+            inpBleed.preferredSize.width = 50;
+
             var txtTotalThickness = pnlSpecs.add("statictext", undefined, "Berechnete Buchdicke: " + (totalPages * defaultPaperThickness).toFixed(2) + " mm");
 
             inpThickness.onChanging = function () {
                 var val = parseFloat(inpThickness.text) || 0;
                 txtTotalThickness.text = "Berechnete Buchdicke: " + (totalPages * val).toFixed(2) + " mm";
-                updatePreviewCanvas();
             };
 
-            // Strip depth
-            var grpStrip = pnlSpecs.add("group");
-            grpStrip.add("statictext", undefined, "Farbschnitt-Tiefe (mm):");
-            var inpStripDepth = grpStrip.add("edittext", undefined, defaultStripDepth.toString());
-            inpStripDepth.preferredSize.width = 60;
-
-            // Bleed (Beschnittzugabe)
-            var grpBleed = pnlSpecs.add("group");
-            grpBleed.add("statictext", undefined, "Beschnittzugabe Bleed (mm):");
-            var inpBleed = grpBleed.add("edittext", undefined, defaultBleed.toString());
-            inpBleed.preferredSize.width = 60;
-
-            // Opacity / Deckkraft
+            // Opacity slider
             var grpOpacity = pnlSpecs.add("group");
-            grpOpacity.orientation = "column";
-            grpOpacity.alignChildren = ["left", "top"];
+            grpOpacity.orientation = "row";
+            grpOpacity.spacing = 10;
             var lblOpacity = grpOpacity.add("statictext", undefined, "Deckkraft: " + defaultOpacity + "%");
+            lblOpacity.preferredSize.width = 110;
             var sldOpacity = grpOpacity.add("slider", undefined, defaultOpacity, 0, 100);
-            sldOpacity.preferredSize.width = 260;
+            sldOpacity.preferredSize.width = 240;
             sldOpacity.onChanging = function () {
                 lblOpacity.text = "Deckkraft: " + Math.round(sldOpacity.value) + "%";
             };
 
-            // 3. Edge Selection (Kanten-Auswahl)
-            var pnlEdges = leftCol.add("panel", undefined, "3. Schnittkanten-Auswahl");
+            // Section 2: Schnittkanten & Bildauswahl
+            var pnlEdges = win.add("panel", undefined, "2. Schnittkanten & Bildeinbindung");
             pnlEdges.orientation = "column";
-            pnlEdges.alignChildren = ["left", "top"];
-            pnlEdges.spacing = 4;
+            pnlEdges.alignChildren = ["fill", "top"];
+            pnlEdges.spacing = 10;
 
-            var chkForeEdge = pnlEdges.add("checkbox", undefined, "Vorderschnitt (Fore-Edge)");
-            chkForeEdge.value = true;
-            var chkTopEdge = pnlEdges.add("checkbox", undefined, "Kopfschnitt (Top)");
-            chkTopEdge.value = false;
-            var chkBottomEdge = pnlEdges.add("checkbox", undefined, "Fußschnitt (Bottom)");
-            chkBottomEdge.value = false;
+            // Fore-edge row
+            var grpFore = pnlEdges.add("group");
+            grpFore.orientation = "row";
+            grpFore.spacing = 10;
+            var chkFore = grpFore.add("checkbox", undefined, "Vorderschnitt");
+            chkFore.value = true;
+            chkFore.preferredSize.width = 120;
+            var btnFore = grpFore.add("button", undefined, "Bild wahlen...");
+            var txtFore = grpFore.add("statictext", undefined, "Keine Datei", { truncate: "middle" });
+            txtFore.preferredSize.width = 200;
 
-            // Right Column - Interactive Preview Editor
-            var rightCol = mainGroup.add("group");
-            rightCol.orientation = "column";
-            rightCol.alignChildren = ["fill", "top"];
-            rightCol.spacing = 10;
-
-            var pnlPreview = rightCol.add("panel", undefined, "4. Farbschnitt Live-Editor & Positionierung");
-            pnlPreview.orientation = "column";
-            pnlPreview.alignChildren = ["center", "top"];
-
-            // ScriptUI Canvas Area (group control with preferredSize)
-            var canvasSize = [360, 260];
-            var canvas = pnlPreview.add("group");
-            canvas.preferredSize = canvasSize;
-
-            // Transformation State
-            var transformState = {
-                offsetX: 0,
-                offsetY: 0,
-                scale: 1.0
+            btnFore.onClick = function () {
+                var f = File.openDialog("Quellbild fur Vorderschnitt", "Bilder:*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.psd;*.pdf;*.ai");
+                if (f) {
+                    imageFiles.foreEdge = f;
+                    txtFore.text = f.displayName;
+                }
             };
 
-            // Controls below Editor
-            var grpTransforms = pnlPreview.add("group");
-            grpTransforms.orientation = "row";
-            grpTransforms.spacing = 10;
+            // Top edge row
+            var grpTop = pnlEdges.add("group");
+            grpTop.orientation = "row";
+            grpTop.spacing = 10;
+            var chkTop = grpTop.add("checkbox", undefined, "Kopfschnitt (Oben)");
+            chkTop.value = false;
+            chkTop.preferredSize.width = 120;
+            var btnTop = grpTop.add("button", undefined, "Bild wahlen...");
+            var txtTop = grpTop.add("statictext", undefined, "Keine Datei", { truncate: "middle" });
+            txtTop.preferredSize.width = 200;
 
-            var btnPanLeft = grpTransforms.add("button", undefined, "◄");
-            btnPanLeft.preferredSize.width = 30;
-            var btnPanRight = grpTransforms.add("button", undefined, "►");
-            btnPanRight.preferredSize.width = 30;
-            var btnPanUp = grpTransforms.add("button", undefined, "▲");
-            btnPanUp.preferredSize.width = 30;
-            var btnPanDown = grpTransforms.add("button", undefined, "▼");
-            btnPanDown.preferredSize.width = 30;
-
-            var btnZoomIn = grpTransforms.add("button", undefined, "Zoom +");
-            var btnZoomOut = grpTransforms.add("button", undefined, "Zoom -");
-            var btnReset = grpTransforms.add("button", undefined, "Einpassen");
-
-            btnPanLeft.onClick = function () { transformState.offsetX -= 10; updatePreviewCanvas(); };
-            btnPanRight.onClick = function () { transformState.offsetX += 10; updatePreviewCanvas(); };
-            btnPanUp.onClick = function () { transformState.offsetY -= 10; updatePreviewCanvas(); };
-            btnPanDown.onClick = function () { transformState.offsetY += 10; updatePreviewCanvas(); };
-
-            btnZoomIn.onClick = function () { transformState.scale *= 1.1; updatePreviewCanvas(); };
-            btnZoomOut.onClick = function () { transformState.scale /= 1.1; updatePreviewCanvas(); };
-            btnReset.onClick = function () { transformState.offsetX = 0; transformState.offsetY = 0; transformState.scale = 1.0; updatePreviewCanvas(); };
-
-            // Custom Canvas Draw Method
-            canvas.onDraw = function () {
-                var g = canvas.graphics;
-                if (!g) return;
-
-                // Background
-                g.rectPath(0, 0, canvasSize[0], canvasSize[1]);
-                g.fillPath(g.newBrush(g.BrushType.SOLID_COLOR, [0.18, 0.18, 0.18, 1]));
-
-                // Draw simulated book block rectangle
-                var margin = 20;
-                var boxW = canvasSize[0] - (margin * 2);
-                var boxH = canvasSize[1] - (margin * 2);
-                var boxX = margin;
-                var boxY = margin;
-
-                // Book block border
-                g.rectPath(boxX, boxY, boxW, boxH);
-                g.fillPath(g.newBrush(g.BrushType.SOLID_COLOR, [0.95, 0.95, 0.95, 1]));
-                g.strokePath(g.newPen(g.PenType.SOLID_COLOR, [0.4, 0.4, 0.4, 1], 2));
-
-                // Simulated image overlay if file selected
-                if (selectedFile) {
-                    var imgW = boxW * transformState.scale;
-                    var imgH = boxH * transformState.scale;
-                    var imgX = boxX + transformState.offsetX;
-                    var imgY = boxY + transformState.offsetY;
-
-                    g.rectPath(imgX, imgY, imgW, imgH);
-                    g.fillPath(g.newBrush(g.BrushType.SOLID_COLOR, [0.2, 0.6, 0.9, 0.4]));
-                    g.strokePath(g.newPen(g.PenType.SOLID_COLOR, [0.1, 0.4, 0.8, 1], 1));
+            btnTop.onClick = function () {
+                var f = File.openDialog("Quellbild fur Kopfschnitt", "Bilder:*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.psd;*.pdf;*.ai");
+                if (f) {
+                    imageFiles.topEdge = f;
+                    txtTop.text = f.displayName;
                 }
-
-                // Draw page slice lines to visualize book block pages
-                var paperThick = parseFloat(inpThickness.text) || 0.1;
-                var numLines = Math.min(totalPages, 40); // draw up to 40 lines
-                var lineSpacing = boxW / numLines;
-
-                for (var i = 0; i <= numLines; i++) {
-                    var lx = boxX + (i * lineSpacing);
-                    g.newPath();
-                    g.moveTo(lx, boxY);
-                    g.lineTo(lx, boxY + boxH);
-                    g.strokePath(g.newPen(g.PenType.SOLID_COLOR, [0.7, 0.7, 0.7, 0.5], 1));
-                }
-
-                // Title inside canvas
-                g.drawString(selectedFile ? "Vorschau: " + selectedFile.displayName : "Bitte wählen Sie links ein Quellbild aus.", g.newPen(g.PenType.SOLID_COLOR, [0.3, 0.3, 0.3, 1]), boxX + 10, boxY + 15);
             };
 
-            function updatePreviewCanvas() {
-                if (canvas.onDraw) {
-                    canvas.onDraw();
+            // Bottom edge row
+            var grpBottom = pnlEdges.add("group");
+            grpBottom.orientation = "row";
+            grpBottom.spacing = 10;
+            var chkBottom = grpBottom.add("checkbox", undefined, "Fußschnitt (Unten)");
+            chkBottom.value = false;
+            chkBottom.preferredSize.width = 120;
+            var btnBottom = grpBottom.add("button", undefined, "Bild wahlen...");
+            var txtBottom = grpBottom.add("statictext", undefined, "Keine Datei", { truncate: "middle" });
+            txtBottom.preferredSize.width = 200;
+
+            btnBottom.onClick = function () {
+                var f = File.openDialog("Quellbild fur Fußschnitt", "Bilder:*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.psd;*.pdf;*.ai");
+                if (f) {
+                    imageFiles.bottomEdge = f;
+                    txtBottom.text = f.displayName;
                 }
-                if (win && win.layout) {
-                    win.layout.invalidate();
-                }
-            }
+            };
+
+            // Section 3: Test Checkbox & Verification Mode
+            var pnlTest = win.add("panel", undefined, "3. Genauigkeits-Prufung & Referenz-Test");
+            pnlTest.orientation = "column";
+            pnlTest.alignChildren = ["left", "top"];
+            var chkTestMode = pnlTest.add("checkbox", undefined, "Test-Referenzstreifen neben jeder Seite anlegen");
+            chkTestMode.value = false;
 
             // Action Buttons
             var grpButtons = win.add("group");
@@ -380,12 +342,31 @@
             var btnOK = grpButtons.add("button", undefined, "Farbschnitt generieren", { name: "ok" });
 
             btnOK.onClick = function () {
-                if (!selectedFile) {
-                    alert("Bitte wählen Sie zuerst eine Bilddatei für den Farbschnitt aus.", SCRIPT_NAME);
-                    return;
+                var selectedCount = 0;
+                if (chkFore.value) {
+                    selectedCount++;
+                    if (!imageFiles.foreEdge) {
+                        alert("Bitte wahlen Sie ein Bild fur den Vorderschnitt aus.", SCRIPT_NAME);
+                        return;
+                    }
                 }
-                if (!chkForeEdge.value && !chkTopEdge.value && !chkBottomEdge.value) {
-                    alert("Bitte wählen Sie mindestens eine Schnittkante (z.B. Vorderschnitt).", SCRIPT_NAME);
+                if (chkTop.value) {
+                    selectedCount++;
+                    if (!imageFiles.topEdge) {
+                        alert("Bitte wahlen Sie ein Bild fur den Kopfschnitt aus.", SCRIPT_NAME);
+                        return;
+                    }
+                }
+                if (chkBottom.value) {
+                    selectedCount++;
+                    if (!imageFiles.bottomEdge) {
+                        alert("Bitte wahlen Sie ein Bild fur den Fußschnitt aus.", SCRIPT_NAME);
+                        return;
+                    }
+                }
+
+                if (selectedCount === 0) {
+                    alert("Bitte wahlen Sie mindestens eine Schnittkante (z.B. Vorderschnitt) aus.", SCRIPT_NAME);
                     return;
                 }
 
@@ -396,32 +377,39 @@
                 return; // User canceled
             }
 
-            // Parse finalized input values
+            // Parse input values
             var paperThicknessMm = parseFloat(inpThickness.text) || defaultPaperThickness;
             var stripDepthMm = parseFloat(inpStripDepth.text) || defaultStripDepth;
             var bleedMm = parseFloat(inpBleed.text) || defaultBleed;
             var opacityVal = sldOpacity.value;
+            var generateTestStrip = chkTestMode.value;
 
-            var activeEdges = [];
-            if (chkForeEdge.value) activeEdges.push('foreEdge');
-            if (chkTopEdge.value) activeEdges.push('topEdge');
-            if (chkBottomEdge.value) activeEdges.push('bottomEdge');
+            var activeEdgeConfigs = [];
+            if (chkFore.value && imageFiles.foreEdge) {
+                activeEdgeConfigs.push({ edge: 'foreEdge', file: imageFiles.foreEdge });
+            }
+            if (chkTop.value && imageFiles.topEdge) {
+                activeEdgeConfigs.push({ edge: 'topEdge', file: imageFiles.topEdge });
+            }
+            if (chkBottom.value && imageFiles.bottomEdge) {
+                activeEdgeConfigs.push({ edge: 'bottomEdge', file: imageFiles.bottomEdge });
+            }
 
             // Execute slice placement in a single undo transaction
             app.doScript(function () {
                 executeFarbschnitt({
                     doc: doc,
-                    imageFile: selectedFile,
                     paperThickness: FarbschnittMath.mmToPt(paperThicknessMm),
                     stripDepth: FarbschnittMath.mmToPt(stripDepthMm),
                     bleed: FarbschnittMath.mmToPt(bleedMm),
                     opacity: opacityVal,
-                    edges: activeEdges,
-                    transformState: transformState
+                    edgeConfigs: activeEdgeConfigs,
+                    generateTestStrip: generateTestStrip
                 });
             }, ScriptLanguage.JAVASCRIPT, [], UndoModes.ENTIRE_SCRIPT, "Farbschnitt Generieren");
 
             alert("Farbschnitt wurde erfolgreich auf " + totalPages + " Seiten angewendet!", SCRIPT_NAME);
+
         } finally {
             // Restore original ruler preferences
             doc.viewPreferences.horizontalMeasurementUnits = origHUnits;
@@ -435,25 +423,35 @@
     // ==========================================
     function executeFarbschnitt(params) {
         var doc = params.doc;
-        var imageFile = params.imageFile;
         var paperThicknessPt = params.paperThickness;
         var stripDepthPt = params.stripDepth;
         var bleedPt = params.bleed;
         var opacityVal = params.opacity;
-        var edges = params.edges;
-        var transformState = params.transformState;
+        var edgeConfigs = params.edgeConfigs;
+        var generateTestStrip = params.generateTestStrip;
 
         // 1. Manage Farbschnitt Layer
         var targetLayer = doc.layers.itemByName(LAYER_NAME);
         if (targetLayer.isValid) {
-            // Clear existing elements on layer for clean re-run
             targetLayer.pageItems.everyItem().remove();
         } else {
             targetLayer = doc.layers.add({ name: LAYER_NAME });
         }
-        targetLayer.move(LocationOptions.AT_BEGINNING); // Bring layer to top
+        targetLayer.move(LocationOptions.AT_BEGINNING);
 
-        // Get None swatch safely regardless of language (English "None", German "Ohne", etc.)
+        // 2. Manage Test Verification Layer
+        var testLayer = doc.layers.itemByName(TEST_LAYER_NAME);
+        if (testLayer.isValid) {
+            testLayer.pageItems.everyItem().remove();
+        }
+        if (generateTestStrip) {
+            if (!testLayer.isValid) {
+                testLayer = doc.layers.add({ name: TEST_LAYER_NAME });
+            }
+            testLayer.move(LocationOptions.AT_BEGINNING);
+        }
+
+        // Get None swatch safely regardless of language
         var noneSwatch = doc.swatches.item(0);
 
         var totalPages = doc.pages.length;
@@ -472,8 +470,10 @@
             var pWidth = pBounds[3] - pBounds[1];
             var pHeight = pBounds[2] - pBounds[0];
 
-            for (var e = 0; e < edges.length; e++) {
-                var edge = edges[e];
+            for (var c = 0; c < edgeConfigs.length; c++) {
+                var config = edgeConfigs[c];
+                var edge = config.edge;
+                var imageFile = config.file;
 
                 var sliceRes = FarbschnittMath.calculateSlice({
                     pageIndex: i,
@@ -485,33 +485,49 @@
                     pageHeight: pHeight,
                     isVerso: isVerso,
                     edge: edge,
-                    offsetX: transformState.offsetX,
-                    offsetY: transformState.offsetY,
-                    scaleFactor: transformState.scale
+                    generateTestStrip: generateTestStrip
                 });
 
-                // Create rectangle frame on page
+                // Create main slice frame
                 var rect = page.rectangles.add(targetLayer, {
                     strokeWeight: 0,
                     strokeColor: noneSwatch,
                     fillColor: noneSwatch
                 });
 
-                // Set Frame Geometric Bounds [top, left, bottom, right]
                 rect.geometricBounds = sliceRes.frameBounds;
-
-                // Place image file
                 rect.place(imageFile);
 
-                // Fit and transform placed graphic inside frame
                 if (rect.graphics.length > 0) {
                     var graphic = rect.graphics[0];
                     graphic.geometricBounds = sliceRes.graphicBounds;
+                    if (sliceRes.rotation !== 0) {
+                        graphic.rotationAngle = sliceRes.rotation;
+                    }
                 }
 
-                // Apply Opacity
                 if (opacityVal < 100) {
                     rect.transparencySettings.blendingSettings.opacity = opacityVal;
+                }
+
+                // Place reference test strip if enabled
+                if (generateTestStrip && sliceRes.testFrameBounds) {
+                    var testRect = page.rectangles.add(testLayer, {
+                        strokeWeight: 0.5,
+                        strokeColor: doc.swatches.itemByName("Black") || noneSwatch,
+                        fillColor: noneSwatch
+                    });
+
+                    testRect.geometricBounds = sliceRes.testFrameBounds;
+                    testRect.place(imageFile);
+
+                    if (testRect.graphics.length > 0) {
+                        var testGraphic = testRect.graphics[0];
+                        testGraphic.geometricBounds = sliceRes.graphicBounds;
+                        if (sliceRes.rotation !== 0) {
+                            testGraphic.rotationAngle = sliceRes.rotation;
+                        }
+                    }
                 }
             }
         }
