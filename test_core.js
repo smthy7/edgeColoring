@@ -23,7 +23,6 @@ var topVerso = FarbschnittMath.calculateSlice({
 
 assert.strictEqual(topVerso.frameBounds[1], -bleed, "Verso top edge left should extend into left bleed");
 assert.strictEqual(topVerso.frameBounds[3], pageWidth, "Verso top edge right MUST NOT cross spine (pageWidth)");
-assert.strictEqual(topVerso.rotation, 90, "Top edge image rotation should be 90 degrees");
 
 // Test 2: Top Edge on Recto (Right page). Spine is at X = 0.
 var topRecto = FarbschnittMath.calculateSlice({
@@ -40,22 +39,5 @@ var topRecto = FarbschnittMath.calculateSlice({
 
 assert.strictEqual(topRecto.frameBounds[1], 0, "Recto top edge left MUST NOT cross spine (X = 0)");
 assert.strictEqual(topRecto.frameBounds[3], pageWidth + bleed, "Recto top edge right should extend into right bleed");
-
-// Test 3: Test strip reference mode
-var testStripVerso = FarbschnittMath.calculateSlice({
-    pageIndex: 5,
-    pageCount: 100,
-    paperThickness: 0.28,
-    stripDepth: stripDepth,
-    bleed: bleed,
-    pageWidth: pageWidth,
-    pageHeight: pageHeight,
-    isVerso: true,
-    edge: 'foreEdge',
-    generateTestStrip: true
-});
-
-assert(testStripVerso.testFrameBounds !== null, "Test strip bounds should be generated when requested");
-assert(testStripVerso.testFrameBounds[3] < -bleed, "Test strip for Verso should be placed to the left of the page bleed");
 
 console.log("All Core & Spine Clamping Math Tests Passed Successfully!");

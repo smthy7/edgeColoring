@@ -20,7 +20,11 @@
         },
 
         /**
-         * Calculates frame bounds, graphic bounds, and rotation for a page slice
+         * Calculates frame bounds, graphic bounds, and rotation angle for a page slice.
+         *
+         * - Fore-edge: Slices along X-axis (width = stripDepth + bleed, height = pageHeight + 2*bleed).
+         * - Top-edge: Slices along Y-axis (width = pageWidth + bleed, height = stripDepth + bleed), rotation = 90°.
+         * - Bottom-edge: Slices along Y-axis (width = pageWidth + bleed, height = stripDepth + bleed), rotation = 270°.
          */
         calculateSlice: function (opts) {
             var pageIndex = opts.pageIndex;          // 0 to pageCount - 1
@@ -32,95 +36,76 @@
             var pageHeight = opts.pageHeight;        // Page height in pt
             var isVerso = opts.isVerso;              // true = Left page, false = Right page
             var edge = opts.edge || 'foreEdge';      // 'foreEdge', 'topEdge', 'bottomEdge'
-            var generateTestStrip = opts.generateTestStrip || false;
 
-            // Total thickness of book block
-            var totalThickness = pageCount * paperThickness;
-            var sliceXStart = pageIndex * paperThickness;
+            var totalBookThickness = pageCount * paperThickness;
 
             var frameTop, frameLeft, frameBottom, frameRight;
-            var rotation = 0; // Graphic rotation in degrees (0, 90, 270)
+            var graphicTop, graphicLeft, graphicBottom, graphicRight;
+            var rotation = 0;
 
             if (edge === 'foreEdge') {
                 frameTop = -bleed;
                 frameBottom = pageHeight + bleed;
                 if (isVerso) {
-                    // Left page (Verso): Fore-edge on LEFT. Bleed on outer left.
                     frameLeft = -bleed;
                     frameRight = stripDepth;
                 } else {
-                    // Right page (Recto): Fore-edge on RIGHT. Bleed on outer right.
                     frameLeft = pageWidth - stripDepth;
                     frameRight = pageWidth + bleed;
                 }
+
+                var frameWidth = frameRight - frameLeft;
+                var totalGraphicWidth = frameWidth * pageCount;
+                graphicLeft = frameLeft - (pageIndex * frameWidth);
+                graphicRight = graphicLeft + totalGraphicWidth;
+                graphicTop = frameTop;
+                graphicBottom = frameBottom;
+                rotation = 0;
+
             } else if (edge === 'topEdge') {
                 frameTop = -bleed;
                 frameBottom = stripDepth;
                 if (isVerso) {
-                    // Left page: Outer edge left, Spine right. No bleed across spine!
                     frameLeft = -bleed;
-                    frameRight = pageWidth; // Stop strictly at spine (right side)
+                    frameRight = pageWidth;
                 } else {
-                    // Right page: Spine left, Outer edge right. No bleed across spine!
-                    frameLeft = 0; // Start strictly at spine (left side)
+                    frameLeft = 0;
                     frameRight = pageWidth + bleed;
                 }
-                rotation = 90; // Rotate image for top edge
+
+                var frameHeight = frameBottom - frameTop;
+                var totalGraphicHeight = frameHeight * pageCount;
+                graphicLeft = frameLeft;
+                graphicRight = frameRight;
+                graphicTop = frameTop - (pageIndex * frameHeight);
+                graphicBottom = graphicTop + totalGraphicHeight;
+                rotation = 90;
+
             } else if (edge === 'bottomEdge') {
                 frameTop = pageHeight - stripDepth;
                 frameBottom = pageHeight + bleed;
                 if (isVerso) {
-                    // Left page: Outer edge left, Spine right. No bleed across spine!
                     frameLeft = -bleed;
-                    frameRight = pageWidth; // Stop strictly at spine (right side)
+                    frameRight = pageWidth;
                 } else {
-                    // Right page: Spine left, Outer edge right. No bleed across spine!
-                    frameLeft = 0; // Start strictly at spine (left side)
+                    frameLeft = 0;
                     frameRight = pageWidth + bleed;
                 }
-                rotation = 270; // Rotate image for bottom edge
-            }
 
-            var frameWidth = frameRight - frameLeft;
-
-            // Compute graphic positioning
-            var graphicWidth = frameWidth * (totalThickness / paperThickness);
-            var scaleX = graphicWidth / totalThickness;
-
-            var graphicLeft = frameLeft - (sliceXStart * scaleX);
-            var graphicRight = graphicLeft + graphicWidth;
-
-            var graphicTop = -bleed;
-            var graphicBottom = pageHeight + bleed;
-
-            // Test Strip / Reference Mode Bounds (placed directly adjacent to page for visual verification)
-            var testFrameBounds = null;
-            if (generateTestStrip) {
-                var testOffset = 15; // 15 pt spacing outside page margin
-                if (isVerso) {
-                    // Place test strip to left of left page
-                    testFrameBounds = [
-                        frameTop,
-                        -bleed - testOffset - stripDepth,
-                        frameBottom,
-                        -bleed - testOffset
-                    ];
-                } else {
-                    // Place test strip to right of right page
-                    testFrameBounds = [
-                        frameTop,
-                        pageWidth + bleed + testOffset,
-                        frameBottom,
-                        pageWidth + bleed + testOffset + stripDepth
-                    ];
-                }
+                var frameHeight = frameBottom - frameTop;
+                var totalGraphicHeight = frameHeight * pageCount;
+                graphicLeft = frameLeft;
+                graphicRight = frameRight;
+                graphicTop = frameTop - (pageIndex * frameHeight);
+                graphicBottom = graphicTop + totalGraphicHeight;
+                rotation = 270;
             }
 
             return {
                 frameBounds: [frameTop, frameLeft, frameBottom, frameRight],
                 graphicBounds: [graphicTop, graphicLeft, graphicBottom, graphicRight],
-                rotation: rotation,
-                testFrameBounds: testFrameBounds
+                totalBookThickness: totalBookThickness,
+                rotation: rotation
             };
         }
     };

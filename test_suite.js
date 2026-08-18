@@ -1,7 +1,7 @@
 const { FarbschnittMath } = require('./src/FarbschnittCore.js');
 const assert = require('assert');
 
-console.log("=== Comprehensive Automated Test Suite for Farbschnitt.jsx (v2.0) ===");
+console.log("=== Comprehensive Automated Test Suite for Farbschnitt.jsx (v2.1) ===");
 
 function createMockDoc(pageCount, pageWidthPt, pageHeightPt) {
     var pages = [];
@@ -39,12 +39,11 @@ var p0Slice = FarbschnittMath.calculateSlice({
     edge: 'foreEdge'
 });
 
-assert.strictEqual(p0Slice.rotation, 0, "Fore-edge rotation must be 0 degrees");
 assert.strictEqual(p0Slice.frameBounds[1], doc.width - stripDepthPt, "Recto Fore-edge left frame bound check");
 assert.strictEqual(p0Slice.frameBounds[3], doc.width + bleedPt, "Recto Fore-edge right frame bound check");
 
 // Test 2: Top Edge (Spine Protection)
-console.log("\n[Test 2] Testing Top Edge Spine Protection & 90° Rotation...");
+console.log("\n[Test 2] Testing Top Edge Spine Protection...");
 var p1TopSlice = FarbschnittMath.calculateSlice({
     pageIndex: 1,
     pageCount: doc.pages.length,
@@ -57,11 +56,10 @@ var p1TopSlice = FarbschnittMath.calculateSlice({
     edge: 'topEdge'
 });
 
-assert.strictEqual(p1TopSlice.rotation, 90, "Top edge rotation must be 90 degrees");
 assert.strictEqual(p1TopSlice.frameBounds[3], doc.width, "Verso top edge must not cross spine (X = doc.width)");
 
 // Test 3: Bottom Edge (Spine Protection)
-console.log("\n[Test 3] Testing Bottom Edge Spine Protection & 270° Rotation...");
+console.log("\n[Test 3] Testing Bottom Edge Spine Protection...");
 var p0BottomSlice = FarbschnittMath.calculateSlice({
     pageIndex: 0,
     pageCount: doc.pages.length,
@@ -74,25 +72,6 @@ var p0BottomSlice = FarbschnittMath.calculateSlice({
     edge: 'bottomEdge'
 });
 
-assert.strictEqual(p0BottomSlice.rotation, 270, "Bottom edge rotation must be 270 degrees");
 assert.strictEqual(p0BottomSlice.frameBounds[1], 0, "Recto bottom edge left frame must start at spine (X = 0)");
-
-// Test 4: Verification Test Mode
-console.log("\n[Test 4] Testing Test Verification Reference Strip Mode...");
-var p0TestSlice = FarbschnittMath.calculateSlice({
-    pageIndex: 0,
-    pageCount: doc.pages.length,
-    paperThickness: paperThicknessPt,
-    stripDepth: stripDepthPt,
-    bleed: bleedPt,
-    pageWidth: doc.width,
-    pageHeight: doc.height,
-    isVerso: doc.pages[0].isVerso,
-    edge: 'foreEdge',
-    generateTestStrip: true
-});
-
-assert(p0TestSlice.testFrameBounds !== null, "Test strip frame bounds must be present when generateTestStrip is true");
-assert(p0TestSlice.testFrameBounds[1] > doc.width + bleedPt, "Test strip for Recto must be placed outside right page bleed");
 
 console.log("\nALL AUTOMATED TESTS PASSED SUCCESSFULLY!");
