@@ -17,9 +17,9 @@ Ein professionelles Adobe InDesign Script (ExtendScript) für die automatisierte
 
 - **Plug-and-Play ScriptUI:** Einfache Handhabung direkt in Adobe InDesign.
 - **Separate Bildauswahl pro Schnittkante:** Laden Sie für Vorderschnitt, Kopfschnitt und Fußschnitt jeweils eigene Quellbilder.
-- **Automatische Bildrotation:** Kopfschnitt (90°) und Fußschnitt (270°) werden automatisch im richtigen Winkel gedreht.
+- **Präzise Geometrie-Berechnung:** Berechnet Bildausschnitte direkt über seitenbezogene Koordinaten ohne skalierungsbedingte Pasteboard-Fehler.
 - **Bund-Schutz (Spine / Gutter Protection):** Bei Kopf- und Fußschnitt ragt die Farbleiste niemals über den Buchbund (Mitte bei Doppelseiten) hinaus.
-- **Sichere Maßeinheiten:** Setzt vorübergehend InDesign-Linealeinstellungen auf Punkte und stellt diese am Ende im `finally`-Block wieder her.
+- **Sichere Maßeinheiten:** Verwendet native `UnitValue`-Konvertierung unter Beibehaltung der aktiven Dokumenten-Lineale.
 - **Doppelseiten-Logik (Facing Pages / Verso & Recto):** Exakte Berechnung der Außenkanten bei linken und rechten Seiten.
 - **Einstellbare Parameter:**
   - Papierstärke / Seitendicke (mm/Seite)
