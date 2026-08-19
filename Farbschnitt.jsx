@@ -8,13 +8,14 @@
  * - Clean modern ScriptUI layout
  * - Independent image selection per edge
  * - Automatic image rotation for top (90°) and bottom (270°) edges
+ * - Exact 1/N page slice mapping across book block pages
  * - Spine / Gutter protection (top/bottom edges do not cross page center spine)
- * - Exact mathematical slicing across book block pages
- * - Safe ruler units and pasteboard margin handling preventing Error 54
+ * - Dynamic pasteboard margin expansion preventing Error 54 pasteboard displacement
+ * - Safe ruler units and preference handling in try...finally block
  * - Managed "Farbschnitt" layer & single-step UNDO
  *
  * @author Agency Quality Software Engineering
- * @version 5.2.0
+ * @version 6.0.0
  */
 
 #target indesign
@@ -43,13 +44,7 @@
             return pt * PT_TO_MM;
         },
 
-        /**
-         * Calculates frame bounds, graphic bounds, and rotation angle for a page slice.
-         */
         calculateSlice: function (opts) {
-            var pageIndex = opts.pageIndex;          // 0 to pageCount - 1
-            var pageCount = opts.pageCount;          // Total pages in book
-            var paperThickness = opts.paperThickness;// Thickness per page in pt
             var stripDepth = opts.stripDepth;        // Depth of strip in pt
             var bleed = opts.bleed;                  // Bleed in pt
             var pageWidth = opts.pageWidth;          // Page width in pt
@@ -57,10 +52,7 @@
             var isVerso = opts.isVerso;              // true = Left page, false = Right page
             var edge = opts.edge || 'foreEdge';      // 'foreEdge', 'topEdge', 'bottomEdge'
 
-            var totalBookThickness = pageCount * paperThickness;
-
             var frameTop, frameLeft, frameBottom, frameRight;
-            var graphicTop, graphicLeft, graphicBottom, graphicRight;
             var rotation = 0;
 
             if (edge === 'foreEdge') {
@@ -73,13 +65,6 @@
                     frameLeft = pageWidth - stripDepth;
                     frameRight = pageWidth + bleed;
                 }
-
-                var frameWidth = frameRight - frameLeft;
-                var totalGraphicWidth = frameWidth * pageCount;
-                graphicLeft = frameLeft - (pageIndex * frameWidth);
-                graphicRight = graphicLeft + totalGraphicWidth;
-                graphicTop = frameTop;
-                graphicBottom = frameBottom;
                 rotation = 0;
 
             } else if (edge === 'topEdge') {
@@ -92,13 +77,6 @@
                     frameLeft = 0;
                     frameRight = pageWidth + bleed;
                 }
-
-                var frameHeight = frameBottom - frameTop;
-                var totalGraphicHeight = frameHeight * pageCount;
-                graphicLeft = frameLeft;
-                graphicRight = frameRight;
-                graphicTop = frameTop - (pageIndex * frameHeight);
-                graphicBottom = graphicTop + totalGraphicHeight;
                 rotation = 90;
 
             } else if (edge === 'bottomEdge') {
@@ -111,28 +89,15 @@
                     frameLeft = 0;
                     frameRight = pageWidth + bleed;
                 }
-
-                var frameHeight = frameBottom - frameTop;
-                var totalGraphicHeight = frameHeight * pageCount;
-                graphicLeft = frameLeft;
-                graphicRight = frameRight;
-                graphicTop = frameTop - (pageIndex * frameHeight);
-                graphicBottom = graphicTop + totalGraphicHeight;
                 rotation = 270;
             }
 
             return {
                 frameBounds: [frameTop, frameLeft, frameBottom, frameRight],
-                graphicBounds: [graphicTop, graphicLeft, graphicBottom, graphicRight],
-                totalBookThickness: totalBookThickness,
                 rotation: rotation
             };
         }
     };
-
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { FarbschnittMath: FarbschnittMath };
-    }
 
     if (typeof app === 'undefined' || !app.documents) {
         return;
@@ -454,11 +419,31 @@
                 if (rect.graphics.length > 0) {
                     var graphic = rect.graphics[0];
 
-                    // Set geometric bounds for page i's slice
-                    graphic.geometricBounds = sliceRes.graphicBounds;
-
+                    // Rotate graphic first if top (90°) or bottom (270°)
                     if (sliceRes.rotation !== 0) {
                         graphic.rotationAngle = sliceRes.rotation;
+                    }
+
+                    rect.fit(FitOptions.FILL_PROPORTIONALLY);
+
+                    // Measure fitted slice width/height BEFORE scaling by totalPages!
+                    var gBounds = graphic.geometricBounds;
+                    var sliceW = gBounds[3] - gBounds[1];
+                    var sliceH = gBounds[2] - gBounds[0];
+
+                    if (edge === 'foreEdge') {
+                        graphic.horizontalScale *= totalPages;
+                        graphic.move(undefined, [-i * sliceW, 0]);
+
+                    } else if (edge === 'topEdge') {
+                        // Top edge (rotated 90°): local X maps to page Y (nach oben)
+                        graphic.horizontalScale *= totalPages;
+                        graphic.move(undefined, [0, -i * sliceH]);
+
+                    } else if (edge === 'bottomEdge') {
+                        // Bottom edge (rotated 270°): local X maps to page Y (nach unten)
+                        graphic.horizontalScale *= totalPages;
+                        graphic.move(undefined, [0, -i * sliceH]);
                     }
                 }
 
