@@ -7,13 +7,14 @@
  * Features:
  * - Clean modern ScriptUI layout
  * - Independent image selection per edge
- * - Center-anchor matrix rotation for top (90°) and bottom (270°) edges
+ * - Automatic image rotation for top (90°) and bottom (270°) edges
  * - Spine / Gutter protection (top/bottom edges do not cross page center spine)
- * - Dynamic pasteboard margin expansion preventing Error 54 pasteboard displacement
+ * - Exact mathematical slicing across book block pages
+ * - Safe ruler units and pasteboard margin handling preventing Error 54
  * - Managed "Farbschnitt" layer & single-step UNDO
  *
  * @author Agency Quality Software Engineering
- * @version 4.1.0
+ * @version 5.2.0
  */
 
 #target indesign
@@ -42,15 +43,24 @@
             return pt * PT_TO_MM;
         },
 
+        /**
+         * Calculates frame bounds, graphic bounds, and rotation angle for a page slice.
+         */
         calculateSlice: function (opts) {
-            var stripDepth = opts.stripDepth;        // Depth in pt
+            var pageIndex = opts.pageIndex;          // 0 to pageCount - 1
+            var pageCount = opts.pageCount;          // Total pages in book
+            var paperThickness = opts.paperThickness;// Thickness per page in pt
+            var stripDepth = opts.stripDepth;        // Depth of strip in pt
             var bleed = opts.bleed;                  // Bleed in pt
             var pageWidth = opts.pageWidth;          // Page width in pt
             var pageHeight = opts.pageHeight;        // Page height in pt
             var isVerso = opts.isVerso;              // true = Left page, false = Right page
             var edge = opts.edge || 'foreEdge';      // 'foreEdge', 'topEdge', 'bottomEdge'
 
+            var totalBookThickness = pageCount * paperThickness;
+
             var frameTop, frameLeft, frameBottom, frameRight;
+            var graphicTop, graphicLeft, graphicBottom, graphicRight;
             var rotation = 0;
 
             if (edge === 'foreEdge') {
@@ -63,6 +73,13 @@
                     frameLeft = pageWidth - stripDepth;
                     frameRight = pageWidth + bleed;
                 }
+
+                var frameWidth = frameRight - frameLeft;
+                var totalGraphicWidth = frameWidth * pageCount;
+                graphicLeft = frameLeft - (pageIndex * frameWidth);
+                graphicRight = graphicLeft + totalGraphicWidth;
+                graphicTop = frameTop;
+                graphicBottom = frameBottom;
                 rotation = 0;
 
             } else if (edge === 'topEdge') {
@@ -75,6 +92,13 @@
                     frameLeft = 0;
                     frameRight = pageWidth + bleed;
                 }
+
+                var frameHeight = frameBottom - frameTop;
+                var totalGraphicHeight = frameHeight * pageCount;
+                graphicLeft = frameLeft;
+                graphicRight = frameRight;
+                graphicTop = frameTop - (pageIndex * frameHeight);
+                graphicBottom = graphicTop + totalGraphicHeight;
                 rotation = 90;
 
             } else if (edge === 'bottomEdge') {
@@ -87,11 +111,20 @@
                     frameLeft = 0;
                     frameRight = pageWidth + bleed;
                 }
+
+                var frameHeight = frameBottom - frameTop;
+                var totalGraphicHeight = frameHeight * pageCount;
+                graphicLeft = frameLeft;
+                graphicRight = frameRight;
+                graphicTop = frameTop - (pageIndex * frameHeight);
+                graphicBottom = graphicTop + totalGraphicHeight;
                 rotation = 270;
             }
 
             return {
                 frameBounds: [frameTop, frameLeft, frameBottom, frameRight],
+                graphicBounds: [graphicTop, graphicLeft, graphicBottom, graphicRight],
+                totalBookThickness: totalBookThickness,
                 rotation: rotation
             };
         }
@@ -136,11 +169,11 @@
         try {
             var page1 = doc.pages[0];
             var bounds = page1.bounds; // [top, left, bottom, right] in pt
-            var docPageWidth = bounds[3] - bounds[1];
-            var docPageHeight = bounds[2] - bounds[0];
+            var docPageWidthPt = bounds[3] - bounds[1];
+            var docPageHeightPt = bounds[2] - bounds[0];
 
-            var docPageWidthMm = FarbschnittMath.ptToMm(docPageWidth);
-            var docPageHeightMm = FarbschnittMath.ptToMm(docPageHeight);
+            var docPageWidthMm = FarbschnittMath.ptToMm(docPageWidthPt);
+            var docPageHeightMm = FarbschnittMath.ptToMm(docPageHeightPt);
 
             var defaultPaperThickness = 0.1;
             var defaultStripDepth = 3.0;
@@ -324,7 +357,7 @@
             }
 
             // Expand pasteboard margins dynamically so graphic bounds never exceed pasteboard
-            var targetMarginPt = (totalPages * FarbschnittMath.mmToPt(stripDepthMm + bleedMm)) + 500;
+            var targetMarginPt = (totalPages * FarbschnittMath.mmToPt(stripDepthMm + bleedMm)) + 1000;
             try {
                 doc.pasteboardPreferences.pasteboardMargins = [targetMarginPt, targetMarginPt];
             } catch (pErr) {
@@ -421,32 +454,11 @@
                 if (rect.graphics.length > 0) {
                     var graphic = rect.graphics[0];
 
-                    // Transform matrix rotation around center anchor inside frame
+                    // Set geometric bounds for page i's slice
+                    graphic.geometricBounds = sliceRes.graphicBounds;
+
                     if (sliceRes.rotation !== 0) {
-                        try {
-                            var xform = app.transformationMatrices.add({ counterclockwiseRotationAngle: sliceRes.rotation });
-                            graphic.transform(CoordinateSpaces.PARENTSPACE, AnchorPoint.CENTER_ANCHOR, xform);
-                        } catch (rErr) {
-                            graphic.rotationAngle = sliceRes.rotation;
-                        }
-                    }
-
-                    // Fit graphic proportionally inside frame
-                    rect.fit(FitOptions.FILL_PROPORTIONALLY);
-
-                    var gBounds = graphic.geometricBounds;
-                    var gWidth = gBounds[3] - gBounds[1];
-                    var gHeight = gBounds[2] - gBounds[0];
-
-                    if (edge === 'foreEdge') {
-                        graphic.horizontalScale *= totalPages;
-                        graphic.move(undefined, [-i * gWidth, 0]);
-                    } else if (edge === 'topEdge') {
-                        graphic.verticalScale *= totalPages;
-                        graphic.move(undefined, [0, -i * gHeight]);
-                    } else if (edge === 'bottomEdge') {
-                        graphic.verticalScale *= totalPages;
-                        graphic.move(undefined, [0, i * gHeight]);
+                        graphic.rotationAngle = sliceRes.rotation;
                     }
                 }
 
