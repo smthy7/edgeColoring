@@ -1,18 +1,14 @@
 const { FarbschnittMath } = require('./src/FarbschnittCore.js');
 const assert = require('assert');
 
-console.log("=== Testing Farbschnitt v2.6 bounds and paperThickness ===");
+console.log("=== Testing Farbschnitt v3.0 bounds ===");
 
 var pageWidth = 400;
 var pageHeight = 600;
 var bleed = 8.5;
 var stripDepth = 8.5;
-var paperThickness = 0.28;
 
 var slice0 = FarbschnittMath.calculateSlice({
-    pageIndex: 0,
-    pageCount: 100,
-    paperThickness: paperThickness,
     stripDepth: stripDepth,
     bleed: bleed,
     pageWidth: pageWidth,
@@ -22,6 +18,28 @@ var slice0 = FarbschnittMath.calculateSlice({
 });
 
 assert(slice0.frameBounds !== undefined, "Frame bounds must be defined");
-assert(Math.abs(slice0.totalBookThickness - 28) < 0.001, "Total book thickness must be calculated using paperThickness");
+assert.strictEqual(slice0.rotation, 0, "Fore edge rotation is 0");
 
-console.log("All Bounds and PaperThickness Tests Passed Successfully!");
+var sliceTop = FarbschnittMath.calculateSlice({
+    stripDepth: stripDepth,
+    bleed: bleed,
+    pageWidth: pageWidth,
+    pageHeight: pageHeight,
+    isVerso: false,
+    edge: 'topEdge'
+});
+
+assert.strictEqual(sliceTop.rotation, 90, "Top edge rotation is 90");
+
+var sliceBottom = FarbschnittMath.calculateSlice({
+    stripDepth: stripDepth,
+    bleed: bleed,
+    pageWidth: pageWidth,
+    pageHeight: pageHeight,
+    isVerso: false,
+    edge: 'bottomEdge'
+});
+
+assert.strictEqual(sliceBottom.rotation, 270, "Bottom edge rotation is 270");
+
+console.log("All Bounds and Rotation Tests Passed Successfully!");
