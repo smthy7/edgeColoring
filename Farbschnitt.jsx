@@ -1,20 +1,17 @@
 /**
  * Farbschnitt.jsx - Professional Adobe InDesign Script
  *
- * Plug-and-Play ExtendScript for digital book edge printing (Farbschnitt).
- * Supports Fore-edge (Vorderschnitt), Top-edge (Kopfschnitt), and Bottom-edge (Fußschnitt).
+ * Digital book edge printing (Farbschnitt) ExtendScript.
+ * Supports Fore-edge (Vorderschnitt / long side), Top-edge (Kopfschnitt), and Bottom-edge (Fußschnitt).
  *
- * Features:
- * - Clean modern ScriptUI layout
- * - Independent image selection per edge
- * - Exact vertical Y-axis image stretching for top (nach oben) and bottom (nach unten) edges
- * - Spine / Gutter protection (top/bottom edges do not cross page center spine)
- * - Page-relative geometric bounds calculation with dynamic pasteboard expansion
- * - Safe rectangles.add DOM initialization preventing Error 54 pasteboard displacement
- * - Managed "Farbschnitt" layer & single-step UNDO
+ * - Locks ruler origin to PAGE_ORIGIN and measurement units to MILLIMETERS during execution.
+ * - Fore-edge: Stretches image horizontally across page count N.
+ * - Top-edge & Bottom-edge: Stretches image vertically across page count N.
+ * - Spine protection: Top and bottom edges stay within page width boundaries (no overlap across spine).
+ * - Safe pasteboard expansion preventing Error 54.
  *
  * @author Agency Quality Software Engineering
- * @version 8.0.0
+ * @version 9.0.0
  */
 
 #target indesign
@@ -23,128 +20,13 @@
 (function (global) {
     'use strict';
 
-    // ==========================================
-    // CONFIGURATION & CONSTANTS
-    // ==========================================
     var LAYER_NAME = "Farbschnitt";
     var SCRIPT_NAME = "Digitaler Farbschnitt Generator";
-    var MM_TO_PT = 2.834645669291339;
-    var PT_TO_MM = 0.3527777777777778;
-
-    // ==========================================
-    // MATHEMATICAL & GEOMETRIC CORE
-    // ==========================================
-    var FarbschnittMath = {
-        mmToPt: function (mm) {
-            return mm * MM_TO_PT;
-        },
-
-        ptToMm: function (pt) {
-            return pt * PT_TO_MM;
-        },
-
-        /**
-         * Calculates frame bounds and graphic bounds directly in page coordinates.
-         *
-         * - Fore-edge: Slices horizontally along X-axis across page count N.
-         * - Top-edge: Slices vertically along Y-axis across page count N (stretched upwards / nach oben).
-         * - Bottom-edge: Slices vertically along Y-axis across page count N (stretched downwards / nach unten).
-         */
-        calculatePageSlice: function (params) {
-            var pBounds = params.pBounds;            // [top, left, bottom, right] of page
-            var pageIndex = params.pageIndex;        // 0 to pageCount - 1
-            var pageCount = params.pageCount;        // Total pages
-            var stripDepth = params.stripDepth;      // Depth in doc units
-            var bleed = params.bleed;                // Bleed in doc units
-            var isVerso = params.isVerso;            // true = Left page, false = Right page
-            var edge = params.edge;                  // 'foreEdge', 'topEdge', 'bottomEdge'
-
-            var pTop = pBounds[0];
-            var pLeft = pBounds[1];
-            var pBottom = pBounds[2];
-            var pRight = pBounds[3];
-
-            var fTop, fLeft, fBottom, fRight;
-            var gTop, gLeft, gBottom, gRight;
-
-            if (edge === 'foreEdge') {
-                fTop = pTop - bleed;
-                fBottom = pBottom + bleed;
-
-                if (isVerso) {
-                    // Left page (Verso): fore-edge on outer left
-                    fLeft = pLeft - bleed;
-                    fRight = pLeft + stripDepth;
-                } else {
-                    // Right page (Recto): fore-edge on outer right
-                    fLeft = pRight - stripDepth;
-                    fRight = pRight + bleed;
-                }
-
-                var fWidth = fRight - fLeft;
-                var totalGWidth = fWidth * pageCount;
-                gLeft = fLeft - (pageIndex * fWidth);
-                gRight = gLeft + totalGWidth;
-                gTop = fTop;
-                gBottom = fBottom;
-
-            } else if (edge === 'topEdge') {
-                fTop = pTop - bleed;
-                fBottom = pTop + stripDepth;
-
-                if (isVerso) {
-                    // Left page (Verso): outer left (-bleed), spine right (pRight)
-                    fLeft = pLeft - bleed;
-                    fRight = pRight;
-                } else {
-                    // Right page (Recto): spine left (pLeft), outer right (+bleed)
-                    fLeft = pLeft;
-                    fRight = pRight + bleed;
-                }
-
-                var fHeight = fBottom - fTop;
-                var totalGHeight = fHeight * pageCount;
-                gLeft = fLeft;
-                gRight = fRight;
-                gTop = fTop - (pageIndex * fHeight);
-                gBottom = gTop + totalGHeight;
-
-            } else if (edge === 'bottomEdge') {
-                fTop = pBottom - stripDepth;
-                fBottom = pBottom + bleed;
-
-                if (isVerso) {
-                    // Left page (Verso): outer left (-bleed), spine right (pRight)
-                    fLeft = pLeft - bleed;
-                    fRight = pRight;
-                } else {
-                    // Right page (Recto): spine left (pLeft), outer right (+bleed)
-                    fLeft = pLeft;
-                    fRight = pRight + bleed;
-                }
-
-                var fHeight = fBottom - fTop;
-                var totalGHeight = fHeight * pageCount;
-                gLeft = fLeft;
-                gRight = fRight;
-                gTop = fTop - (pageIndex * fHeight);
-                gBottom = gTop + totalGHeight;
-            }
-
-            return {
-                frameBounds: [fTop, fLeft, fBottom, fRight],
-                graphicBounds: [gTop, gLeft, gBottom, gRight]
-            };
-        }
-    };
 
     if (typeof app === 'undefined' || !app.documents) {
         return;
     }
 
-    // ==========================================
-    // MAIN SCRIPT EXECUTION
-    // ==========================================
     function main() {
         if (app.documents.length === 0) {
             alert("Bitte öffnen Sie zuerst ein InDesign-Dokument.", SCRIPT_NAME);
@@ -159,13 +41,20 @@
             return;
         }
 
-        var page1 = doc.pages[0];
-        var bounds = page1.bounds; // [top, left, bottom, right] in active doc units
-        var docPageWidth = bounds[3] - bounds[1];
-        var docPageHeight = bounds[2] - bounds[0];
+        // Temporarily set millimeter units for UI representation
+        var origHUnitsUI = doc.viewPreferences.horizontalMeasurementUnits;
+        var origVUnitsUI = doc.viewPreferences.verticalMeasurementUnits;
+        doc.viewPreferences.horizontalMeasurementUnits = MeasurementUnits.MILLIMETERS;
+        doc.viewPreferences.verticalMeasurementUnits = MeasurementUnits.MILLIMETERS;
 
-        var docPageWidthMm = FarbschnittMath.ptToMm(docPageWidth);
-        var docPageHeightMm = FarbschnittMath.ptToMm(docPageHeight);
+        var page1 = doc.pages[0];
+        var bounds = page1.bounds; // [top, left, bottom, right] in mm
+        var docPageWidthMm = bounds[3] - bounds[1];
+        var docPageHeightMm = bounds[2] - bounds[0];
+
+        // Restore UI units
+        doc.viewPreferences.horizontalMeasurementUnits = origHUnitsUI;
+        doc.viewPreferences.verticalMeasurementUnits = origVUnitsUI;
 
         var defaultPaperThickness = 0.1;
         var defaultStripDepth = 3.0;
@@ -178,7 +67,7 @@
             bottomEdge: null
         };
 
-        // Build Clean ScriptUI Dialog
+        // ScriptUI Dialog Setup
         var win = new Window("dialog", SCRIPT_NAME + " - Pro Studio");
         win.orientation = "column";
         win.alignChildren = ["fill", "top"];
@@ -237,12 +126,12 @@
         var grpFore = pnlEdges.add("group");
         grpFore.orientation = "row";
         grpFore.spacing = 10;
-        var chkFore = grpFore.add("checkbox", undefined, "Vorderschnitt");
+        var chkFore = grpFore.add("checkbox", undefined, "Vorderschnitt (Lange Seite)");
         chkFore.value = true;
-        chkFore.preferredSize.width = 120;
+        chkFore.preferredSize.width = 170;
         var btnFore = grpFore.add("button", undefined, "Bild wählen...");
         var txtFore = grpFore.add("statictext", undefined, "Keine Datei", { truncate: "middle" });
-        txtFore.preferredSize.width = 200;
+        txtFore.preferredSize.width = 160;
 
         btnFore.onClick = function () {
             var f = File.openDialog("Quellbild für Vorderschnitt");
@@ -257,10 +146,10 @@
         grpTop.spacing = 10;
         var chkTop = grpTop.add("checkbox", undefined, "Kopfschnitt (Oben)");
         chkTop.value = false;
-        chkTop.preferredSize.width = 120;
+        chkTop.preferredSize.width = 170;
         var btnTop = grpTop.add("button", undefined, "Bild wählen...");
         var txtTop = grpTop.add("statictext", undefined, "Keine Datei", { truncate: "middle" });
-        txtTop.preferredSize.width = 200;
+        txtTop.preferredSize.width = 160;
 
         btnTop.onClick = function () {
             var f = File.openDialog("Quellbild für Kopfschnitt");
@@ -275,10 +164,10 @@
         grpBottom.spacing = 10;
         var chkBottom = grpBottom.add("checkbox", undefined, "Fußschnitt (Unten)");
         chkBottom.value = false;
-        chkBottom.preferredSize.width = 120;
+        chkBottom.preferredSize.width = 170;
         var btnBottom = grpBottom.add("button", undefined, "Bild wählen...");
         var txtBottom = grpBottom.add("statictext", undefined, "Keine Datei", { truncate: "middle" });
-        txtBottom.preferredSize.width = 200;
+        txtBottom.preferredSize.width = 160;
 
         btnBottom.onClick = function () {
             var f = File.openDialog("Quellbild für Fußschnitt");
@@ -348,21 +237,31 @@
             activeEdgeConfigs.push({ edge: 'bottomEdge', file: imageFiles.bottomEdge });
         }
 
+        // Save original document preferences
+        var origRuler = doc.viewPreferences.rulerOrigin;
+        var origHUnits = doc.viewPreferences.horizontalMeasurementUnits;
+        var origVUnits = doc.viewPreferences.verticalMeasurementUnits;
         var origPasteboardMargins = doc.pasteboardPreferences.pasteboardMargins;
-        var targetMarginPt = (totalPages * FarbschnittMath.mmToPt(stripDepthMm + bleedMm)) + 1000;
+
+        var requiredMarginMm = Math.max(5000, (totalPages * (stripDepthMm + bleedMm)) + 1000);
 
         try {
-            doc.pasteboardPreferences.pasteboardMargins = [targetMarginPt, targetMarginPt];
-        } catch (pErr) {
-            // Ignore if pasteboard locked
-        }
+            // Lock units to Millimeters and PAGE_ORIGIN
+            doc.viewPreferences.rulerOrigin = RulerOrigin.PAGE_ORIGIN;
+            doc.viewPreferences.horizontalMeasurementUnits = MeasurementUnits.MILLIMETERS;
+            doc.viewPreferences.verticalMeasurementUnits = MeasurementUnits.MILLIMETERS;
 
-        try {
+            try {
+                doc.pasteboardPreferences.pasteboardMargins = [requiredMarginMm + "mm", requiredMarginMm + "mm"];
+            } catch (pErr) {
+                // Ignore if pasteboard locked
+            }
+
             app.doScript(function () {
                 executeFarbschnitt({
                     doc: doc,
-                    stripDepth: FarbschnittMath.mmToPt(stripDepthMm),
-                    bleed: FarbschnittMath.mmToPt(bleedMm),
+                    stripDepth: stripDepthMm,
+                    bleed: bleedMm,
                     opacity: opacityVal,
                     edgeConfigs: activeEdgeConfigs
                 });
@@ -370,10 +269,16 @@
 
             alert("Farbschnitt wurde erfolgreich auf " + totalPages + " Seiten angewendet!", SCRIPT_NAME);
 
+        } catch (err) {
+            alert("Fehler bei der Ausführung: " + err.message, SCRIPT_NAME);
         } finally {
+            // Cleanly restore all document preferences
             try {
+                doc.viewPreferences.rulerOrigin = origRuler;
+                doc.viewPreferences.horizontalMeasurementUnits = origHUnits;
+                doc.viewPreferences.verticalMeasurementUnits = origVUnits;
                 doc.pasteboardPreferences.pasteboardMargins = origPasteboardMargins;
-            } catch (e) {}
+            } catch (restoreErr) {}
         }
     }
 
@@ -382,8 +287,8 @@
     // ==========================================
     function executeFarbschnitt(params) {
         var doc = params.doc;
-        var stripDepthDoc = params.stripDepth;
-        var bleedDoc = params.bleed;
+        var stripDepth = params.stripDepth; // in mm
+        var bleed = params.bleed;           // in mm
         var opacityVal = params.opacity;
         var edgeConfigs = params.edgeConfigs;
 
@@ -398,7 +303,6 @@
         var noneSwatch = doc.swatches.item(0);
         var totalPages = doc.pages.length;
 
-        // Iterate through each page
         for (var i = 0; i < totalPages; i++) {
             var page = doc.pages[i];
 
@@ -407,24 +311,79 @@
                 isVerso = (i % 2 === 1);
             }
 
-            var pBounds = page.bounds; // [top, left, bottom, right] in active doc units
+            var bounds = page.bounds; // [top, left, bottom, right] in mm (PAGE_ORIGIN: top=0, left=0)
+            var pHeight = bounds[2] - bounds[0];
+            var pWidth = bounds[3] - bounds[1];
 
             for (var c = 0; c < edgeConfigs.length; c++) {
                 var config = edgeConfigs[c];
                 var edge = config.edge;
                 var imageFile = config.file;
 
-                var sliceRes = FarbschnittMath.calculatePageSlice({
-                    pBounds: pBounds,
-                    pageIndex: i,
-                    pageCount: totalPages,
-                    stripDepth: stripDepthDoc,
-                    bleed: bleedDoc,
-                    isVerso: isVerso,
-                    edge: edge
-                });
+                var fTop, fLeft, fBottom, fRight;
+                var gTop, gLeft, gBottom, gRight;
 
-                // Create rectangle on target layer with proper ExtendScript DOM properties
+                if (edge === 'foreEdge') {
+                    // Long side / Vorderschnitt - horizontal stretching across X-axis
+                    fTop = -bleed;
+                    fBottom = pHeight + bleed;
+
+                    if (isVerso) {
+                        fLeft = -bleed;
+                        fRight = stripDepth;
+                    } else {
+                        fLeft = pWidth - stripDepth;
+                        fRight = pWidth + bleed;
+                    }
+
+                    var fWidth = fRight - fLeft;
+                    var totalGWidth = fWidth * totalPages;
+                    gLeft = fLeft - (i * fWidth);
+                    gRight = gLeft + totalGWidth;
+                    gTop = fTop;
+                    gBottom = fBottom;
+
+                } else if (edge === 'topEdge') {
+                    // Top edge / Kopfschnitt - vertical stretching across Y-axis
+                    fTop = -bleed;
+                    fBottom = stripDepth;
+
+                    if (isVerso) {
+                        fLeft = -bleed;
+                        fRight = pWidth; // Stops at spine
+                    } else {
+                        fLeft = 0;      // Starts at spine
+                        fRight = pWidth + bleed;
+                    }
+
+                    var fHeight = fBottom - fTop;
+                    var totalGHeight = fHeight * totalPages;
+                    gTop = fTop - (i * fHeight);
+                    gBottom = gTop + totalGHeight;
+                    gLeft = fLeft;
+                    gRight = fRight;
+
+                } else if (edge === 'bottomEdge') {
+                    // Bottom edge / Fußschnitt - vertical stretching across Y-axis
+                    fTop = pHeight - stripDepth;
+                    fBottom = pHeight + bleed;
+
+                    if (isVerso) {
+                        fLeft = -bleed;
+                        fRight = pWidth; // Stops at spine
+                    } else {
+                        fLeft = 0;      // Starts at spine
+                        fRight = pWidth + bleed;
+                    }
+
+                    var fHeight = fBottom - fTop;
+                    var totalGHeight = fHeight * totalPages;
+                    gTop = fTop - (i * fHeight);
+                    gBottom = gTop + totalGHeight;
+                    gLeft = fLeft;
+                    gRight = fRight;
+                }
+
                 var rect = page.rectangles.add({
                     itemLayer: targetLayer,
                     strokeWeight: 0,
@@ -432,14 +391,12 @@
                     fillColor: noneSwatch
                 });
 
-                rect.geometricBounds = sliceRes.frameBounds;
+                rect.geometricBounds = [fTop, fLeft, fBottom, fRight];
                 rect.place(imageFile);
 
                 if (rect.graphics.length > 0) {
                     var graphic = rect.graphics[0];
-
-                    // Set geometric bounds directly in page coordinates (stretches vertically along Y-axis)
-                    graphic.geometricBounds = sliceRes.graphicBounds;
+                    graphic.geometricBounds = [gTop, gLeft, gBottom, gRight];
                 }
 
                 if (opacityVal < 100) {
@@ -449,7 +406,6 @@
         }
     }
 
-    // Run script
     main();
 
 })(this);
