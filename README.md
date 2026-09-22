@@ -19,6 +19,7 @@ Ein professionelles Adobe InDesign Script (ExtendScript) für die automatisierte
 - **Separate Bildauswahl pro Schnittkante:** Laden Sie für Vorderschnitt, Kopfschnitt und Fußschnitt jeweils eigene Quellbilder.
 - **Präzise Geometrie-Berechnung:** Berechnet Bildausschnitte direkt über seitenbezogene Koordinaten ohne skalierungsbedingte Pasteboard-Fehler.
 - **Bund-Schutz (Spine / Gutter Protection):** Bei Kopf- und Fußschnitt ragt die Farbleiste niemals über den Buchbund (Mitte bei Doppelseiten) hinaus.
+- **Gespiegelte Platzierung (Spiegelung auf linken Seiten):** Bei Kopfschnitt und Fußschnitt wird das Quellbild auf der linken Seite (Verso) horizontal gespiegelt an exakt gleicher Position platziert, sodass Bild auf Bild („Illu auf Illu“) ein stimmiges Gesamtbild ergibt.
 - **Sichere Maßeinheiten:** Verwendet native `UnitValue`-Konvertierung unter Beibehaltung der aktiven Dokumenten-Lineale.
 - **Doppelseiten-Logik (Facing Pages / Verso & Recto):** Exakte Berechnung der Außenkanten bei linken und rechten Seiten.
 - **Einstellbare Parameter:**
@@ -54,5 +55,5 @@ Ein professionelles Adobe InDesign Script (ExtendScript) für die automatisierte
 ## 🛡 Schnittkanten & Bund-Schutz (Spine Protection)
 
 Bei Doppelseiten schützt das Script den Buchbund:
-- **Linke Seite (Verso):** Der Farbschnitt erstreckt sich von der linken Außenkante bis zur rechten Seitenkante (Bund) und geht nicht darüber hinaus.
+- **Linke Seite (Verso):** Der Farbschnitt erstreckt sich von der linken Außenkante bis zur rechten Seitenkante (Bund) und geht nicht darüber hinaus. Bei Kopfschnitt und Fußschnitt wird das Bild auf der linken Seite horizontal gespiegelt.
 - **Rechte Seite (Recto):** Der Farbschnitt beginnt genau am Bund (linke Kante) und erstreckt sich bis zur rechten Außenkante inklusive Beschnittzugabe.

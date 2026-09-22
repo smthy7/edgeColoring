@@ -8,6 +8,7 @@
  * - Fore-edge: Stretches image horizontally across page count N.
  * - Top-edge & Bottom-edge: Stretches image vertically across page count N.
  * - Spine protection: Top and bottom edges stay within page width boundaries (no overlap across spine).
+ * - Verso mirroring for Top & Bottom edges: Mirrored horizontally on left pages so illustrations align face-to-face ("Illu auf Illu").
  * - Safe pasteboard expansion preventing Error 54.
  *
  * @author Agency Quality Software Engineering
@@ -397,6 +398,10 @@
                 if (rect.graphics.length > 0) {
                     var graphic = rect.graphics[0];
                     graphic.geometricBounds = [gTop, gLeft, gBottom, gRight];
+
+                    if (isVerso && (edge === 'topEdge' || edge === 'bottomEdge')) {
+                        graphic.flip = Flip.HORIZONTAL;
+                    }
                 }
 
                 if (opacityVal < 100) {
