@@ -400,7 +400,7 @@
                     graphic.geometricBounds = [gTop, gLeft, gBottom, gRight];
                 }
 
-                if (isVerso && (edge === 'topEdge' || edge === 'bottomEdge')) {
+                if (isVerso) {
                     rect.flipItem(Flip.HORIZONTAL, AnchorPoint.CENTER_ANCHOR);
                 }
 
